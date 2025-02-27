@@ -1,19 +1,15 @@
-use glium::{buffer::Mapping, uniform, GlObject, Surface};
-use rodio::{Decoder, OutputStream, Source};
+use glium::{buffer::Mapping, uniform, GlObject, Surface, Vertex};
 
 use std::{
     f32::consts::PI,
-    fs::{self, File},
-    io::{BufReader, Read},
+    fs::{self},
+    io::Read,
     path::Path,
     time::Instant,
     vec,
 };
 
-mod game_core;
 mod objects;
-
-use objects::Vertex;
 
 fn main() {
     let event_loop = glium::winit::event_loop::EventLoop::builder()
@@ -22,29 +18,16 @@ fn main() {
 
     let (window, display) = glium::backend::glutin::SimpleWindowBuilder::new()
         .with_title("I'm a pear")
-        .with_inner_size(1000, 1000)
+        .with_inner_size(1920, 10)
         .build(&event_loop);
 
-    let image = image::load(
-        std::io::Cursor::new(&include_bytes!("../assets/teto_pear.gif")),
-        image::ImageFormat::Gif,
-    )
-    .unwrap()
-    .to_rgba8();
-    let image_dimentions = image.dimensions();
-    let image =
-        glium::texture::RawImage2d::from_raw_rgba_reversed(&image.into_raw(), image_dimentions);
-    let texture = glium::Texture2d::new(&display, image).unwrap();
-
     let shape = vec![
-        Vertex::new([-1., -1., 0.], [0.0, 0.0]).unwrap(),
-        Vertex::new([1., -1., 0.], [1.0, 0.0]).unwrap(),
-        Vertex::new([-1., 1., 0.], [0.0, 1.0]).unwrap(),
-        Vertex::new([-1., 1., 0.], [0.0, 1.0]).unwrap(),
-        Vertex::new([1., -1., 0.], [1.0, 0.0]).unwrap(),
-        Vertex::new([1., 1., 0.], [1.0, 1.0]).unwrap(),
+        objects::Vertex::new([1.0, 0.0, 0.0], [0.0, 0.0]),
+        objects::Vertex::new([0.0, 1.0, 0.0], [0.0, 0.0]),
+        objects::Vertex::new([-1.0, 1.0, 0.0], [0.0, 0.0]),
     ];
-    let mut vertex_buffer = glium::VertexBuffer::new(&display, &shape).unwrap();
+
+    let vertex_buffer = glium::VertexBuffer::new(&display, &shape).unwrap();
     println!("{}", &vertex_buffer.get_id());
     let indices = glium::index::NoIndices(glium::index::PrimitiveType::TrianglesList);
 
@@ -86,17 +69,13 @@ fn main() {
             glium::winit::event::Event::WindowEvent { event, .. } => match event {
                 glium::winit::event::WindowEvent::CloseRequested => window_target.exit(),
                 glium::winit::event::WindowEvent::RedrawRequested => {
-                    game_core::game_update();
-
                     let uniforms = uniform! {
 
                         u_time : start.elapsed().as_secs_f32(),
-                        tex: &texture,
                     };
 
                     if start.elapsed().as_secs_f32() > PI + 1.0 {
                         if sound_played == 0 {
-                            play_sound();
                             sound_played = 1;
                             /* for i in vertex_buffer.map().len() {
                                 vertex_buffer.map() =
@@ -146,18 +125,6 @@ fn main() {
         })
         .unwrap();
 }
-
-fn play_sound() {
-    let (_stream, stream_handle) = OutputStream::try_default().unwrap();
-
-    let file = BufReader::new(File::open("./assets/ABATOOKAAAAAM_Track1.wav").unwrap());
-
-    let source = Decoder::new(file).unwrap();
-
-    let _ = stream_handle.play_raw(source.convert_samples());
-    std::thread::sleep(std::time::Duration::from_secs(5));
-}
-
 fn reverse_vertex_buffer(list: Mapping<'_, [Vertex]>) -> Mapping<'_, [Vertex]> {
     let mut a = vec![];
     let mut b = list;

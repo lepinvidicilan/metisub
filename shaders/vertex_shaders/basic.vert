@@ -5,9 +5,6 @@ layout(location = 0) in vec3 position;
 uniform vec2 u_resolution;
 uniform float u_time;
 
-in vec2 tex_coords;
-out vec2 v_tex_coords;
-
 out vec4 FragPos;
 
 out vec2 screen_size;
@@ -35,20 +32,18 @@ void main() {
     rotationz[1] = vec3(sin(u_time), cos(u_time), 0.);
     rotationz[2] = vec3(0., 0., 1.);
 
-    v_tex_coords = tex_coords; //  homotecia;
-
     FragPos = vec4(position, 1.0);
 
-    vec3 uv = position; /*
-                    if (u_resolution.x > u_resolution.y) {
-                        uv.x *= u_resolution.y / u_resolution.x;
-                    } else {
-                        uv.y *= u_resolution.x / u_resolution.y;
-                    }*/
-    if (u_time < PI) {
-        uv *= 1 - sqrt(1 - pow(u_time / PI, 2));
-        gl_Position = vec4(-uv * rotationy * rotationx, 1.0);
+    vec3 uv = position;
+    if (u_resolution.x > u_resolution.y) {
+        uv.x *= u_resolution.y / u_resolution.x;
     } else {
-        gl_Position = vec4(uv, 1.0);
-    }
+        uv.y *= u_resolution.x / u_resolution.y;
+    } /*
+        if (u_time < PI) {
+            uv *= 1 - sqrt(1 - pow(u_time / PI, 2));
+            gl_Position = vec4(-uv * rotationy * rotationx, 1.0);
+        } else {
+            gl_Position = vec4(uv, 1.0);
+        }*/
 }
