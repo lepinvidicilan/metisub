@@ -1,4 +1,4 @@
-use image::{GenericImage, GenericImageView};
+use cgmath::prelude::*;
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
 use winit::{
@@ -9,11 +9,13 @@ use winit::{
     window::{Window, WindowId},
 };
 
+mod texture;
+
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 struct Vertex {
     position: [f32; 3],
-    color: [f32; 3],
+    tex_coords: [f32; 2],
 }
 
 impl Vertex {
@@ -30,9 +32,117 @@ impl Vertex {
                 wgpu::VertexAttribute {
                     offset: std::mem::size_of::<[f32; 3]>() as wgpu::BufferAddress,
                     shader_location: 1,
-                    format: wgpu::VertexFormat::Float32x3,
+                    format: wgpu::VertexFormat::Float32x2,
                 },
             ],
+        }
+    }
+}
+
+struct Instance {
+    position: cgmath::Vector3<f32>,
+    rotation: cgmath::Quaternion<f32>,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct InstanceRaw {
+    model: [[f32; 4]; 4],
+}
+
+impl InstanceRaw {
+    fn desc() -> wgpu::VertexBufferLayout<'static> {
+        use std::mem;
+        wgpu::VertexBufferLayout {
+            array_stride: mem::size_of::<InstanceRaw>() as wgpu::BufferAddress,
+            // We need to switch from using a step mode of Vertex to Instance
+            // This means that our shaders will only change to use the next
+            // instance when the shader starts processing a new instance
+            step_mode: wgpu::VertexStepMode::Instance,
+            attributes: &[
+                // A mat4 takes up 4 vertex slots as it is technically 4 vec4s. We need to define a slot
+                // for each vec4. We'll have to reassemble the mat4 in the shader.
+                wgpu::VertexAttribute {
+                    offset: 0,
+                    // While our vertex shader only uses locations 0, and 1 now, in later tutorials, we'll
+                    // be using 2, 3, and 4, for Vertex. We'll start at slot 5, not conflict with them later
+                    shader_location: 5,
+                    format: wgpu::VertexFormat::Float32x4,
+                },
+                wgpu::VertexAttribute {
+                    offset: mem::size_of::<[f32; 4]>() as wgpu::BufferAddress,
+                    shader_location: 6,
+                    format: wgpu::VertexFormat::Float32x4,
+                },
+                wgpu::VertexAttribute {
+                    offset: mem::size_of::<[f32; 8]>() as wgpu::BufferAddress,
+                    shader_location: 7,
+                    format: wgpu::VertexFormat::Float32x4,
+                },
+                wgpu::VertexAttribute {
+                    offset: mem::size_of::<[f32; 12]>() as wgpu::BufferAddress,
+                    shader_location: 8,
+                    format: wgpu::VertexFormat::Float32x4,
+                },
+            ],
+        }
+    }
+}
+
+impl Instance {
+    fn to_raw(&self) -> InstanceRaw {
+        InstanceRaw {
+            model: (cgmath::Matrix4::from_translation(self.position)
+                * cgmath::Matrix4::from(self.rotation))
+            .into(),
+        }
+    }
+}
+
+struct CameraController {
+    speed: f32,
+    is_forward_pressed: bool,
+    is_backward_pressed: bool,
+    is_left_pressed: bool,
+    is_right_pressed: bool,
+}
+
+impl CameraController {
+    fn new(speed: f32) -> Self {
+        Self {
+            speed: speed,
+            is_forward_pressed: false,
+            is_backward_pressed: false,
+            is_left_pressed: false,
+            is_right_pressed: false,
+        }
+    }
+
+    fn update_camera(&self, camera: &mut Camera, delta: f32) {
+        let speed = self.speed * delta;
+        use cgmath::InnerSpace;
+        let forward = camera.target - camera.eye;
+        let forward_norm = forward.normalize();
+        let forward_mag = forward.magnitude();
+
+        if self.is_forward_pressed && forward_mag > self.speed * 0.1 {
+            camera.eye += forward_norm * speed;
+        }
+
+        if self.is_backward_pressed {
+            camera.eye -= forward_norm * speed;
+        }
+
+        let right = forward_norm.cross(camera.up);
+
+        let forward = camera.target - camera.eye;
+        let forward_mag = forward.magnitude();
+
+        if self.is_right_pressed {
+            camera.eye = camera.target - (forward + right * speed).normalize() * forward_mag;
+        }
+        if self.is_left_pressed {
+            camera.eye = camera.target - (forward - right * speed).normalize() * forward_mag;
         }
     }
 }
@@ -41,23 +151,23 @@ impl Vertex {
 const VERTICES: &[Vertex] = &[
     Vertex {
         position: [-0.0868241, 0.49240386, 0.0],
-        color: [0.5, 0.0, 0.5],
+        tex_coords: [0.4131759, 0.99240386],
     }, // A
     Vertex {
         position: [-0.49513406, 0.06958647, 0.0],
-        color: [0.5, 0.0, 0.5],
+        tex_coords: [0.0048659444, 0.56958647],
     }, // B
     Vertex {
         position: [-0.21918549, -0.44939706, 0.0],
-        color: [0.5, 0.0, 0.5],
+        tex_coords: [0.28081453, 0.05060294],
     }, // C
     Vertex {
         position: [0.35966998, -0.3473291, 0.0],
-        color: [0.5, 0.0, 0.5],
+        tex_coords: [0.85967, 0.1526709],
     }, // D
     Vertex {
         position: [0.44147372, 0.2347359, 0.0],
-        color: [0.5, 0.0, 0.5],
+        tex_coords: [0.9414737, 0.7347359],
     }, // E
 ];
 
@@ -66,32 +176,32 @@ const INDICES: &[u16] = &[0, 1, 4, 1, 2, 4, 2, 3, 4];
 const VERTICES_2: &[Vertex] = &[
     Vertex {
         position: [-0.8, -0.8, 0.0],
-        color: [1.0, 0.5, 1.0],
+        tex_coords: [1.0, 0.5],
     },
     Vertex {
         position: [-0.5, 0.5, 0.0],
-        color: [0.0, 0.5, 0.0],
+        tex_coords: [0.0, 0.5],
     },
     Vertex {
         position: [-0.0868241, 0.49240386, 0.0],
-        color: [0.5, 0.0, 0.5],
+        tex_coords: [0.4131759, 0.99240386],
     }, // A
     Vertex {
         position: [-0.49513406, 0.06958647, 0.0],
-        color: [0.5, 0.0, 0.5],
+        tex_coords: [0.0048659444, 0.56958647],
     }, // B
     Vertex {
         position: [-0.21918549, -0.44939706, 0.0],
-        color: [0.5, 0.0, 0.5],
+        tex_coords: [0.28081453, 0.05060294],
     }, // C
     Vertex {
         position: [0.35966998, -0.3473291, 0.0],
-        color: [0.5, 0.0, 0.5],
+        tex_coords: [0.85967, 0.1526709],
     }, // D
     Vertex {
         position: [0.44147372, 0.2347359, 0.0],
-        color: [0.5, 0.0, 0.5],
-    },
+        tex_coords: [0.9414737, 0.7347359],
+    }, // E
 ];
 
 const INDICES_2: &[u16] = &[0, 1, 6, 1, 2, 6, 2, 3, 6, 4, 5, 6];
@@ -125,9 +235,59 @@ impl OutsideOfTheLimitOfTimeMagicAndScience {
         }
         self.previous_rendering_time_of_this_awfull_image = std::time::Instant::now();
     }
+
+    fn get_delta(&mut self) -> f32 {
+        self.previous_rendering_time_of_this_awfull_image
+            .elapsed()
+            .as_secs_f32()
+    }
 }
 
-struct State {
+#[rustfmt::skip]
+pub const OPENGL_TO_WGPU_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::from_cols(
+    cgmath::Vector4::new(1.0, 0.0, 0.0, 0.0),
+    cgmath::Vector4::new(0.0, 1.0, 0.0, 0.0),
+    cgmath::Vector4::new(0.0, 0.0, 0.5, 0.0),
+    cgmath::Vector4::new(0.0, 0.0, 0.5, 1.0)
+);
+
+struct Camera {
+    eye: cgmath::Point3<f32>,
+    target: cgmath::Point3<f32>,
+    up: cgmath::Vector3<f32>,
+    aspect: f32,
+    fovy: f32,
+    znear: f32,
+    zfar: f32,
+}
+
+impl Camera {
+    fn build_view_projection_matrix(&self) -> cgmath::Matrix4<f32> {
+        let view = cgmath::Matrix4::look_at_rh(self.eye, self.target, self.up);
+        let proj = cgmath::perspective(cgmath::Deg(self.fovy), self.aspect, self.znear, self.zfar);
+        return OPENGL_TO_WGPU_MATRIX * proj * view;
+    }
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct CameraUniform {
+    view_proj: [[f32; 4]; 4],
+}
+
+impl CameraUniform {
+    fn new() -> Self {
+        use cgmath::SquareMatrix;
+        Self {
+            view_proj: cgmath::Matrix4::identity().into(),
+        }
+    }
+    fn update_view_proj(&mut self, camera: &Camera) {
+        self.view_proj = camera.build_view_projection_matrix().into();
+    }
+}
+
+pub struct State {
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -142,6 +302,17 @@ struct State {
     index_buffer: wgpu::Buffer,
     index_buffer_2: wgpu::Buffer,
     num_indices: u32,
+    diffuse_bind_group: wgpu::BindGroup,
+    diffuse_texture: texture::Texture,
+    camera: Camera,
+    camera_uniform: CameraUniform,
+    camera_buffer: wgpu::Buffer,
+    camera_bind_group: wgpu::BindGroup,
+    camera_controller: CameraController,
+    instances: Vec<Instance>,
+    instance_buffer: wgpu::Buffer,
+    depth_bind_group: wgpu::BindGroup,
+    depth_texture: texture::Texture,
 }
 
 impl State {
@@ -157,6 +328,37 @@ impl State {
         let size = window.inner_size();
 
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+
+        const NUM_INSTANCES_PER_ROW: u32 = 10;
+        const INSTANCE_DISPLACEMENT: cgmath::Vector3<f32> = cgmath::Vector3::new(
+            NUM_INSTANCES_PER_ROW as f32 * 0.5,
+            0.0,
+            NUM_INSTANCES_PER_ROW as f32 * 0.5,
+        );
+
+        let instances = (0..NUM_INSTANCES_PER_ROW)
+            .flat_map(|z| {
+                (0..NUM_INSTANCES_PER_ROW).map(move |x| {
+                    let position = cgmath::Vector3 {
+                        x: x as f32,
+                        y: 0.0,
+                        z: z as f32,
+                    } - INSTANCE_DISPLACEMENT;
+
+                    let rotation = if position.is_zero() {
+                        cgmath::Quaternion::from_axis_angle(
+                            cgmath::Vector3::unit_z(),
+                            cgmath::Deg(0.0),
+                        )
+                    } else {
+                        cgmath::Quaternion::from_axis_angle(position.normalize(), cgmath::Deg(45.0))
+                    };
+                    Instance { position, rotation }
+                })
+            })
+            .collect::<Vec<_>>();
+
+        let instance_data = instances.iter().map(Instance::to_raw).collect::<Vec<_>>();
 
         let surface = instance.create_surface(window.clone()).unwrap();
 
@@ -184,6 +386,12 @@ impl State {
             .await
             .unwrap();
 
+        let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Instance Buffer"),
+            contents: bytemuck::cast_slice(&instance_data),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+
         let surface_caps = surface.get_capabilities(&adapter);
 
         let surface_format = surface_caps
@@ -204,28 +412,133 @@ impl State {
             desired_maximum_frame_latency: 2,
         };
 
-        let diffuse_bytes = include_bytes!("../assets/intensity_map.png");
-        let diffuse_image = image::load_from_memory(diffuse_bytes).unwrap();
-        let diffuse_rgba = diffuse_image.to_rgb8();
-        let dimensions = diffuse_image.dimensions();
+        let diffuse_bytes = include_bytes!("../assets/textures/placeholder.png");
 
-        let texture_size = wgpu::Extent3d {
-            width: dimensions.0,
-            height: dimensions.1,
-            depth_or_array_layers: 1,
-        };
+        let diffuse_texture =
+            texture::Texture::from_bytes(&device, &queue, diffuse_bytes, "place_holder.png")
+                .unwrap();
 
-        let diffuse_texture = device.create_texture(&wgpu::TextureDescriptor {
-            size: texture_size,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            label: Some("diffuse_texture"),
-            view_formats: &[],
+        let texture_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("texture_bind_group_layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
+            });
+
+        let depth_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("depth_bind_group_layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Depth,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison),
+                        count: None,
+                    },
+                ],
+            });
+
+        let diffuse_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &texture_bind_group_layout,
+            label: Some("diffuse_bind_group"),
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&diffuse_texture.view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&diffuse_texture.sampler),
+                },
+            ],
         });
 
+        let depth_texture =
+            texture::Texture::create_depth_texture(&device, &config, "depth_texture");
+
+        let depth_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("depth_bind_group"),
+            layout: &depth_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&depth_texture.view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&depth_texture.sampler),
+                },
+            ],
+        });
+
+        let camera = Camera {
+            eye: (0.0, 1.0, 2.0).into(),
+            target: (0.0, 0.0, 0.0).into(),
+            up: cgmath::Vector3::unit_y(),
+            aspect: config.width as f32 / config.height as f32,
+            fovy: 45.0,
+            znear: 0.1,
+            zfar: 100.0,
+        };
+
+        let mut camera_uniform = CameraUniform::new();
+        camera_uniform.update_view_proj(&camera);
+
+        let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Camera Buffer"),
+            contents: bytemuck::cast_slice(&[camera_uniform]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        let camera_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+                label: Some("camera_bind_group_layout"),
+            });
+
+        let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &camera_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: camera_buffer.as_entire_binding(),
+            }],
+            label: Some("camera_bind_group"),
+        });
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
@@ -234,7 +547,11 @@ impl State {
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Render Pipeline Layout"),
-                bind_group_layouts: &[],
+                bind_group_layouts: &[
+                    &texture_bind_group_layout,
+                    &camera_bind_group_layout,
+                    //&depth_bind_group_layout,
+                ],
                 push_constant_ranges: &[],
             });
 
@@ -244,7 +561,7 @@ impl State {
             vertex: wgpu::VertexState {
                 module: &shader,
                 entry_point: Some("vs_main"),
-                buffers: &[Vertex::desc()],
+                buffers: &[Vertex::desc(), InstanceRaw::desc()],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
             },
             fragment: Some(wgpu::FragmentState {
@@ -266,7 +583,13 @@ impl State {
                 unclipped_depth: false,
                 conservative: false,
             },
-            depth_stencil: None,
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: texture::Texture::DEPTH_FORMAT,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::Less,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
             multisample: wgpu::MultisampleState {
                 count: 1,
                 mask: !0,
@@ -309,7 +632,9 @@ impl State {
             usage: wgpu::BufferUsages::INDEX,
         });
 
-        let state = State {
+        let camera_controller = CameraController::new(4.0);
+
+        State {
             surface,
             device,
             queue,
@@ -324,9 +649,18 @@ impl State {
             index_buffer,
             index_buffer_2,
             num_indices,
-        };
-
-        state
+            diffuse_bind_group,
+            diffuse_texture,
+            camera,
+            camera_uniform,
+            camera_buffer,
+            camera_bind_group,
+            camera_controller,
+            instances,
+            instance_buffer,
+            depth_bind_group,
+            depth_texture,
+        }
     }
 
     pub fn get_window(&self) -> &Window {
@@ -339,6 +673,8 @@ impl State {
             self.config.width = new_size.width;
             self.config.height = new_size.height;
             self.surface.configure(&self.device, &self.config);
+            self.depth_texture =
+                texture::Texture::create_depth_texture(&self.device, &self.config, "depth_texutre");
         }
     }
 
@@ -363,14 +699,25 @@ impl State {
                         store: wgpu::StoreOp::Store,
                     },
                 })],
-                depth_stencil_attachment: None,
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.depth_texture.view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
                 occlusion_query_set: None,
                 timestamp_writes: None,
             });
             render_pass.set_pipeline(&self.render_pipeline);
+            render_pass.set_bind_group(0, &self.diffuse_bind_group, &[]);
+            render_pass.set_bind_group(1, &self.camera_bind_group, &[]);
+            //render_pass.set_bind_group(2, &self.depth_bind_group, &[]);
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+            render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
             render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-            render_pass.draw_indexed(0..self.num_indices, 0, 0..1);
+            render_pass.draw_indexed(0..self.num_indices, 0, 0..self.instances.len() as _);
         }
         self.queue.submit(std::iter::once(encoder.finish()));
         output.present();
@@ -378,7 +725,53 @@ impl State {
         Ok(())
     }
 
-    fn input(&mut self, event: &WindowEvent) {
+    fn handle_key(&mut self, event_loop: &ActiveEventLoop, code: KeyCode, is_pressed: bool) {
+        match code {
+            KeyCode::KeyZ | KeyCode::ArrowUp => {
+                self.camera_controller.is_forward_pressed = is_pressed;
+            }
+            KeyCode::KeyS | KeyCode::ArrowDown => {
+                self.camera_controller.is_backward_pressed = is_pressed;
+            }
+            KeyCode::KeyQ | KeyCode::ArrowLeft => {
+                self.camera_controller.is_left_pressed = is_pressed;
+            }
+            KeyCode::KeyD | KeyCode::ArrowRight => {
+                self.camera_controller.is_right_pressed = is_pressed;
+            }
+            KeyCode::Space => {
+                if is_pressed {
+                    println!("Space !");
+                    let temp = self.vertex_buffer.clone();
+                    self.vertex_buffer = self.vertex_buffer_2.clone();
+                    self.vertex_buffer_2 = temp;
+
+                    let temp = self.index_buffer.clone();
+                    self.index_buffer = self.index_buffer_2.clone();
+                    self.index_buffer_2 = temp;
+
+                    self.num_indices = self.index_buffer.size() as u32 / size_of::<u16>() as u32;
+                }
+            }
+            KeyCode::Escape => {
+                event_loop.exit();
+            }
+            _ => (),
+        }
+    }
+
+    fn update(&mut self) {
+        self.camera_controller
+            .update_camera(&mut self.camera, self.escape.get_delta());
+        self.camera_uniform.update_view_proj(&self.camera);
+        self.queue.write_buffer(
+            &self.camera_buffer,
+            0,
+            bytemuck::cast_slice(&[self.camera_uniform]),
+        );
+    }
+
+    fn input(&mut self, event: &WindowEvent, event_loop: &ActiveEventLoop) {
         match event {
             WindowEvent::CursorMoved {
                 device_id: _,
@@ -397,25 +790,19 @@ impl State {
                 is_synthetic: _,
             } => match key.state {
                 ElementState::Released => match key.physical_key {
-                    PhysicalKey::Code(a) => match a {
-                        KeyCode::Space => {
-                            println!("Space !");
-                            let temp = self.vertex_buffer.clone();
-                            self.vertex_buffer = self.vertex_buffer_2.clone();
-                            self.vertex_buffer_2 = temp;
-
-                            let temp = self.index_buffer.clone();
-                            self.index_buffer = self.index_buffer_2.clone();
-                            self.index_buffer_2 = temp;
-
-                            self.num_indices =
-                                self.index_buffer.size() as u32 / size_of::<u16>() as u32;
-                        }
-                        _ => (),
-                    },
+                    PhysicalKey::Code(code) => {
+                        self.handle_key(event_loop, code, false);
+                        self.update();
+                    }
                     _ => (),
                 },
-                _ => (),
+                ElementState::Pressed => match key.physical_key {
+                    PhysicalKey::Code(code) => {
+                        self.handle_key(event_loop, code, true);
+                        self.update();
+                    }
+                    _ => (),
+                },
             },
             _ => (),
         }
@@ -447,13 +834,14 @@ impl ApplicationHandler for App {
         event: WindowEvent,
     ) {
         let state = self.state.as_mut().unwrap();
-        state.input(&event);
+        state.input(&event, &event_loop);
         match event {
             WindowEvent::CloseRequested => {
                 println!("The close button was pressed; stopping");
                 event_loop.exit();
             }
             WindowEvent::RedrawRequested => {
+                state.update();
                 let _ = state.escape.the_city_of_all_knowing();
                 let _ = state.render();
                 state.get_window().request_redraw();

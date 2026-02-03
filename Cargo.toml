@@ -7,6 +7,7 @@ edition = "2021"
 resolver = "2"
 
 [dependencies]
+cgmath = "0.18"
 cfg-if = "1"
 winit = { version = "0.30.8", features = ["android-native-activity"] }
 bytemuck = { version = "1.16", features = [ "derive" ] }
@@ -14,6 +15,7 @@ env_logger = "0.11"
 log = "0.4"
 wgpu = "25.0.0"
 pollster = "0.4"
+anyhow = "1.0.100"
 
 [dependencies.image]
 version =  "0.24"
