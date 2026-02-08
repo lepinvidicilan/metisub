@@ -4,6 +4,9 @@ struct CameraUniform{
 @group(1) @binding(0)
 var<uniform> camera: CameraUniform;
 
+@group(2) @binding(0)
+var<uniform> time: f32;
+
 struct InstanceInput {
     @location(5) model_matrix_0: vec4<f32>,
     @location(6) model_matrix_1: vec4<f32>,
@@ -26,6 +29,14 @@ fn vs_main(
     model: VertexInput,
     instance: InstanceInput,
 ) -> VertexOutput {
+
+
+    let z_rotation_matrix = mat3x3<f32>(
+        cos(time), -sin(time), 0,
+        sin(time),  cos(time), 0,
+        0,          0,         1
+    );
+
     let model_matrix = mat4x4<f32>(
         instance.model_matrix_0,
         instance.model_matrix_1,

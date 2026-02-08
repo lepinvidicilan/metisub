@@ -1,5 +1,5 @@
 use cgmath::prelude::*;
-use std::sync::Arc;
+use std::{f64::consts::PI, sync::Arc};
 use wgpu::util::DeviceExt;
 use winit::{
     application::ApplicationHandler,
@@ -9,35 +9,10 @@ use winit::{
     window::{Window, WindowId},
 };
 
+mod model;
+use model::Vertex;
+mod resources;
 mod texture;
-
-#[repr(C)]
-#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
-struct Vertex {
-    position: [f32; 3],
-    tex_coords: [f32; 2],
-}
-
-impl Vertex {
-    fn desc() -> wgpu::VertexBufferLayout<'static> {
-        wgpu::VertexBufferLayout {
-            array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &[
-                wgpu::VertexAttribute {
-                    offset: 0,
-                    shader_location: 0,
-                    format: wgpu::VertexFormat::Float32x3,
-                },
-                wgpu::VertexAttribute {
-                    offset: std::mem::size_of::<[f32; 3]>() as wgpu::BufferAddress,
-                    shader_location: 1,
-                    format: wgpu::VertexFormat::Float32x2,
-                },
-            ],
-        }
-    }
-}
 
 struct Instance {
     position: cgmath::Vector3<f32>,
@@ -110,7 +85,7 @@ struct CameraController {
 impl CameraController {
     fn new(speed: f32) -> Self {
         Self {
-            speed: speed,
+            speed,
             is_forward_pressed: false,
             is_backward_pressed: false,
             is_left_pressed: false,
@@ -147,78 +122,24 @@ impl CameraController {
     }
 }
 
-// lib.rs
-const VERTICES: &[Vertex] = &[
-    Vertex {
-        position: [-0.0868241, 0.49240386, 0.0],
-        tex_coords: [0.4131759, 0.99240386],
-    }, // A
-    Vertex {
-        position: [-0.49513406, 0.06958647, 0.0],
-        tex_coords: [0.0048659444, 0.56958647],
-    }, // B
-    Vertex {
-        position: [-0.21918549, -0.44939706, 0.0],
-        tex_coords: [0.28081453, 0.05060294],
-    }, // C
-    Vertex {
-        position: [0.35966998, -0.3473291, 0.0],
-        tex_coords: [0.85967, 0.1526709],
-    }, // D
-    Vertex {
-        position: [0.44147372, 0.2347359, 0.0],
-        tex_coords: [0.9414737, 0.7347359],
-    }, // E
-];
-
 const INDICES: &[u16] = &[0, 1, 4, 1, 2, 4, 2, 3, 4];
-
-const VERTICES_2: &[Vertex] = &[
-    Vertex {
-        position: [-0.8, -0.8, 0.0],
-        tex_coords: [1.0, 0.5],
-    },
-    Vertex {
-        position: [-0.5, 0.5, 0.0],
-        tex_coords: [0.0, 0.5],
-    },
-    Vertex {
-        position: [-0.0868241, 0.49240386, 0.0],
-        tex_coords: [0.4131759, 0.99240386],
-    }, // A
-    Vertex {
-        position: [-0.49513406, 0.06958647, 0.0],
-        tex_coords: [0.0048659444, 0.56958647],
-    }, // B
-    Vertex {
-        position: [-0.21918549, -0.44939706, 0.0],
-        tex_coords: [0.28081453, 0.05060294],
-    }, // C
-    Vertex {
-        position: [0.35966998, -0.3473291, 0.0],
-        tex_coords: [0.85967, 0.1526709],
-    }, // D
-    Vertex {
-        position: [0.44147372, 0.2347359, 0.0],
-        tex_coords: [0.9414737, 0.7347359],
-    }, // E
-];
-
-const INDICES_2: &[u16] = &[0, 1, 6, 1, 2, 6, 2, 3, 6, 4, 5, 6];
 
 struct OutsideOfTheLimitOfTimeMagicAndScience {
     the_universal_non_obstant_time: std::time::Instant,
     previous_rendering_time_of_this_awfull_image: std::time::Instant,
+    pi_loop: std::time::Instant,
 }
 
 impl OutsideOfTheLimitOfTimeMagicAndScience {
-    fn new(&mut self) -> Self {
+    fn new() -> Self {
         let the_universal_non_obstant_time = std::time::Instant::now();
         let previous_rendering_time_of_this_awfull_image = std::time::Instant::now();
+        let pi_loop = std::time::Instant::now();
 
         Self {
             the_universal_non_obstant_time,
             previous_rendering_time_of_this_awfull_image,
+            pi_loop,
         }
     }
 
@@ -232,6 +153,9 @@ impl OutsideOfTheLimitOfTimeMagicAndScience {
                     .as_secs_f64()
             );
             self.the_universal_non_obstant_time = std::time::Instant::now();
+        }
+        if self.pi_loop.elapsed().as_secs_f64() > 2.0 * PI {
+            self.pi_loop = std::time::Instant::now();
         }
         self.previous_rendering_time_of_this_awfull_image = std::time::Instant::now();
     }
@@ -265,7 +189,7 @@ impl Camera {
     fn build_view_projection_matrix(&self) -> cgmath::Matrix4<f32> {
         let view = cgmath::Matrix4::look_at_rh(self.eye, self.target, self.up);
         let proj = cgmath::perspective(cgmath::Deg(self.fovy), self.aspect, self.znear, self.zfar);
-        return OPENGL_TO_WGPU_MATRIX * proj * view;
+        OPENGL_TO_WGPU_MATRIX * proj * view
     }
 }
 
@@ -297,10 +221,6 @@ pub struct State {
     render_pipeline: wgpu::RenderPipeline,
     color: wgpu::Color,
     escape: OutsideOfTheLimitOfTimeMagicAndScience,
-    vertex_buffer: wgpu::Buffer,
-    vertex_buffer_2: wgpu::Buffer,
-    index_buffer: wgpu::Buffer,
-    index_buffer_2: wgpu::Buffer,
     num_indices: u32,
     diffuse_bind_group: wgpu::BindGroup,
     diffuse_texture: texture::Texture,
@@ -313,37 +233,30 @@ pub struct State {
     instance_buffer: wgpu::Buffer,
     depth_bind_group: wgpu::BindGroup,
     depth_texture: texture::Texture,
+    time_uniform_buffer: wgpu::Buffer,
+    time_bind_group: wgpu::BindGroup,
+    obj_model: model::Model,
 }
 
 impl State {
     // Creating some of the wgpu types requires async code
     async fn new(window: Arc<Window>) -> State {
-        let escape = OutsideOfTheLimitOfTimeMagicAndScience::new(
-            &mut OutsideOfTheLimitOfTimeMagicAndScience {
-                the_universal_non_obstant_time: std::time::Instant::now(),
-                previous_rendering_time_of_this_awfull_image: std::time::Instant::now(),
-            },
-        );
+        let escape = OutsideOfTheLimitOfTimeMagicAndScience::new();
 
         let size = window.inner_size();
 
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
 
-        const NUM_INSTANCES_PER_ROW: u32 = 10;
-        const INSTANCE_DISPLACEMENT: cgmath::Vector3<f32> = cgmath::Vector3::new(
-            NUM_INSTANCES_PER_ROW as f32 * 0.5,
-            0.0,
-            NUM_INSTANCES_PER_ROW as f32 * 0.5,
-        );
+        const SPACE_BETWEEN: f32 = 10.0;
+        const NUM_INSTANCES_PER_ROW: u32 = 1;
 
         let instances = (0..NUM_INSTANCES_PER_ROW)
             .flat_map(|z| {
                 (0..NUM_INSTANCES_PER_ROW).map(move |x| {
-                    let position = cgmath::Vector3 {
-                        x: x as f32,
-                        y: 0.0,
-                        z: z as f32,
-                    } - INSTANCE_DISPLACEMENT;
+                    let x = SPACE_BETWEEN * (x as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
+                    let z = SPACE_BETWEEN * (z as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
+
+                    let position = cgmath::Vector3 { x, y: 0.0, z };
 
                     let rotation = if position.is_zero() {
                         cgmath::Quaternion::from_axis_angle(
@@ -497,6 +410,37 @@ impl State {
             ],
         });
 
+        let time_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Time_buffer"),
+            contents: bytemuck::cast_slice(&[escape.pi_loop.elapsed().as_secs_f32()]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        let time_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("time_bind_group_layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::all(),
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+
+        let time_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("time_bind_group"),
+            layout: &time_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: time_uniform_buffer.as_entire_binding(),
+            }],
+        });
+
+        #[allow(clippy::cast_precision_loss)]
         let camera = Camera {
             eye: (0.0, 1.0, 2.0).into(),
             target: (0.0, 0.0, 0.0).into(),
@@ -504,7 +448,7 @@ impl State {
             aspect: config.width as f32 / config.height as f32,
             fovy: 45.0,
             znear: 0.1,
-            zfar: 100.0,
+            zfar: 100000.0,
         };
 
         let mut camera_uniform = CameraUniform::new();
@@ -550,7 +494,7 @@ impl State {
                 bind_group_layouts: &[
                     &texture_bind_group_layout,
                     &camera_bind_group_layout,
-                    //&depth_bind_group_layout,
+                    &time_bind_group_layout,
                 ],
                 push_constant_ranges: &[],
             });
@@ -561,7 +505,7 @@ impl State {
             vertex: wgpu::VertexState {
                 module: &shader,
                 entry_point: Some("vs_main"),
-                buffers: &[Vertex::desc(), InstanceRaw::desc()],
+                buffers: &[model::ModelVertex::desc(), InstanceRaw::desc()],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
             },
             fragment: Some(wgpu::FragmentState {
@@ -606,33 +550,18 @@ impl State {
             a: 1.0,
         };
 
-        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Vertex Buffer"),
-            contents: bytemuck::cast_slice(VERTICES),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
-
-        let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Index Buffer"),
-            contents: bytemuck::cast_slice(INDICES),
-            usage: wgpu::BufferUsages::INDEX,
-        });
-
-        let num_indices = INDICES.len() as u32;
-
-        let vertex_buffer_2 = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Vertex Buffer"),
-            contents: bytemuck::cast_slice(VERTICES_2),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
-
-        let index_buffer_2 = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Index Buffer"),
-            contents: bytemuck::cast_slice(INDICES_2),
-            usage: wgpu::BufferUsages::INDEX,
-        });
+        let num_indices = u32::try_from(INDICES.len());
 
         let camera_controller = CameraController::new(4.0);
+
+        let obj_model = resources::load_model(
+            "tetokasane.obj",
+            &device,
+            &queue,
+            &texture_bind_group_layout,
+        )
+        .await
+        .unwrap();
 
         State {
             surface,
@@ -644,11 +573,7 @@ impl State {
             render_pipeline,
             color,
             escape,
-            vertex_buffer,
-            vertex_buffer_2,
-            index_buffer,
-            index_buffer_2,
-            num_indices,
+            num_indices: num_indices.expect("try to unwrap u32 gone wrong"),
             diffuse_bind_group,
             diffuse_texture,
             camera,
@@ -660,6 +585,9 @@ impl State {
             instance_buffer,
             depth_bind_group,
             depth_texture,
+            time_uniform_buffer,
+            time_bind_group,
+            obj_model,
         }
     }
 
@@ -710,14 +638,21 @@ impl State {
                 occlusion_query_set: None,
                 timestamp_writes: None,
             });
-            render_pass.set_pipeline(&self.render_pipeline);
-            render_pass.set_bind_group(0, &self.diffuse_bind_group, &[]);
-            render_pass.set_bind_group(1, &self.camera_bind_group, &[]);
-            //render_pass.set_bind_group(2, &self.depth_bind_group, &[]);
-            render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
-            render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-            render_pass.draw_indexed(0..self.num_indices, 0, 0..self.instances.len() as _);
+            render_pass.set_pipeline(&self.render_pipeline);
+
+            let mesh = &self.obj_model.meshes[0];
+            let material = &self.obj_model.materials[mesh.material];
+
+            use model::DrawModel;
+            render_pass.draw_mesh_instanced(
+                mesh,
+                material,
+                0..self.instances.len() as u32,
+                &self.camera_bind_group,
+            );
+
+            render_pass.set_bind_group(2, &self.time_bind_group, &[]);
         }
         self.queue.submit(std::iter::once(encoder.finish()));
         output.present();
@@ -742,15 +677,6 @@ impl State {
             KeyCode::Space => {
                 if is_pressed {
                     println!("Space !");
-                    let temp = self.vertex_buffer.clone();
-                    self.vertex_buffer = self.vertex_buffer_2.clone();
-                    self.vertex_buffer_2 = temp;
-
-                    let temp = self.index_buffer.clone();
-                    self.index_buffer = self.index_buffer_2.clone();
-                    self.index_buffer_2 = temp;
-
-                    self.num_indices = self.index_buffer.size() as u32 / size_of::<u16>() as u32;
                 }
             }
             KeyCode::Escape => {
@@ -769,6 +695,11 @@ impl State {
             0,
             bytemuck::cast_slice(&[self.camera_uniform]),
         );
+        self.queue.write_buffer(
+            &self.time_uniform_buffer,
+            0,
+            bytemuck::cast_slice(&[self.escape.pi_loop.elapsed().as_secs_f32()]),
+        );
     }
 
     fn input(&mut self, event: &WindowEvent, event_loop: &ActiveEventLoop) {
@@ -778,8 +709,8 @@ impl State {
                 position: pos,
             } => {
                 self.color = wgpu::Color {
-                    r: pos.x / (self.size.width as f64),
-                    g: pos.y / (self.size.height as f64),
+                    r: pos.x / (f64::from(self.size.width)),
+                    g: pos.y / (f64::from(self.size.height)),
                     b: 0.3,
                     a: 1.0,
                 }
@@ -789,20 +720,18 @@ impl State {
                 event: key,
                 is_synthetic: _,
             } => match key.state {
-                ElementState::Released => match key.physical_key {
-                    PhysicalKey::Code(code) => {
+                ElementState::Released => {
+                    if let PhysicalKey::Code(code) = key.physical_key {
                         self.handle_key(event_loop, code, false);
                         self.update();
                     }
-                    _ => (),
-                },
-                ElementState::Pressed => match key.physical_key {
-                    PhysicalKey::Code(code) => {
+                }
+                ElementState::Pressed => {
+                    if let PhysicalKey::Code(code) = key.physical_key {
                         self.handle_key(event_loop, code, true);
                         self.update();
                     }
-                    _ => (),
-                },
+                }
             },
             _ => (),
         }
@@ -834,7 +763,7 @@ impl ApplicationHandler for App {
         event: WindowEvent,
     ) {
         let state = self.state.as_mut().unwrap();
-        state.input(&event, &event_loop);
+        state.input(&event, event_loop);
         match event {
             WindowEvent::CloseRequested => {
                 println!("The close button was pressed; stopping");
@@ -842,7 +771,17 @@ impl ApplicationHandler for App {
             }
             WindowEvent::RedrawRequested => {
                 state.update();
-                let _ = state.escape.the_city_of_all_knowing();
+                state.escape.the_city_of_all_knowing();
+
+                //println!(
+                //    "{}",
+                //    state
+                //        .escape
+                //        .the_universal_non_obstant_time
+                //        .elapsed()
+                //        .as_secs_f64()
+                //);
+
                 let _ = state.render();
                 state.get_window().request_redraw();
             }
