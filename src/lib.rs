@@ -248,7 +248,7 @@ impl State {
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
 
         const SPACE_BETWEEN: f32 = 10.0;
-        const NUM_INSTANCES_PER_ROW: u32 = 1;
+        const NUM_INSTANCES_PER_ROW: u32 = 100;
 
         let instances = (0..NUM_INSTANCES_PER_ROW)
             .flat_map(|z| {
@@ -264,7 +264,10 @@ impl State {
                             cgmath::Deg(0.0),
                         )
                     } else {
-                        cgmath::Quaternion::from_axis_angle(position.normalize(), cgmath::Deg(45.0))
+                        cgmath::Quaternion::from_axis_angle(
+                            position.normalize(),
+                            cgmath::Rad(z.sin()),
+                        )
                     };
                     Instance { position, rotation }
                 })
@@ -277,7 +280,7 @@ impl State {
 
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::default(),
+                power_preference: wgpu::PowerPreference::HighPerformance,
                 compatible_surface: Some(&surface),
                 force_fallback_adapter: false,
             })
@@ -552,7 +555,7 @@ impl State {
 
         let num_indices = u32::try_from(INDICES.len());
 
-        let camera_controller = CameraController::new(4.0);
+        let camera_controller = CameraController::new(120.0);
 
         let obj_model = resources::load_model(
             "tetokasane.obj",
@@ -639,20 +642,15 @@ impl State {
                 timestamp_writes: None,
             });
             render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
+            render_pass.set_bind_group(2, &self.time_bind_group, &[]);
             render_pass.set_pipeline(&self.render_pipeline);
 
-            let mesh = &self.obj_model.meshes[0];
-            let material = &self.obj_model.materials[mesh.material];
-
             use model::DrawModel;
-            render_pass.draw_mesh_instanced(
-                mesh,
-                material,
+            render_pass.draw_model_instanced(
+                &self.obj_model,
                 0..self.instances.len() as u32,
                 &self.camera_bind_group,
             );
-
-            render_pass.set_bind_group(2, &self.time_bind_group, &[]);
         }
         self.queue.submit(std::iter::once(encoder.finish()));
         output.present();
