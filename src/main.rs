@@ -1,13 +1,19 @@
-use metisub::App;
-use winit::event_loop::{ControlFlow, EventLoop};
+use floem::{prelude::*, style};
+mod parser;
 
 fn main() {
-    env_logger::init();
+    let _ = parser::parse_ass(String::from("Ave_mujica_vostfr_ep02_QCHECKDONE.ass"));
 
-    let event_loop = EventLoop::new().unwrap();
+    //floem::launch(counter_view);
+}
 
-    event_loop.set_control_flow(ControlFlow::Poll);
+fn counter_view() -> impl IntoView {
+    let mut counter = RwSignal::new(0);
 
-    let mut app = App::default();
-    event_loop.run_app(&mut app).unwrap();
+    h_stack((
+        button("Increment").action(move || counter += 1),
+        label(move || format!("Value {counter}")),
+        button("Decrement").action(move || counter -= 1),
+    ))
+    .style(|s| s.size_full().items_center().justify_center().gap(10))
 }
