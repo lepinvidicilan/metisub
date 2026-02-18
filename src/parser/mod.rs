@@ -1,8 +1,10 @@
+use std::collections::{self, HashMap};
 use std::io::{prelude::*, BufReader};
 use std::{fs::File, io};
 
 use regex::Regex;
 
+#[derive(Debug)]
 enum State {
     Start,
     Info,
@@ -11,12 +13,10 @@ enum State {
     Events,
 }
 
-#[derive(Clone)]
 pub struct AssStyle {
     label: String,
 }
 
-#[derive(Clone)]
 pub struct Line {
     format: String,
     layer: u8,
@@ -29,60 +29,52 @@ pub struct Line {
     text: String,
 }
 
-#[derive(Clone, Copy)]
 pub struct Time {
-    h: u8,
-    min: u8,
-    sec: f32,
+    hours: u8,
+    minutes: u8,
+    seconds: f32,
 }
 
 pub struct SubtitleFile {
+    script_info: HashMap<String, String>,
     lines: Vec<Line>,
 }
 
 pub fn parse_ass(file_name: String) -> io::Result<()> {
-    let f = File::open(&file_name)?;
-
-    let mut file_lenght = 0;
-    let mut event_starting = 0;
-
+    let info_regex = Regex::new(r"(?<field>.*?): (?<content>.*)").unwrap();
     let event_regex =
         Regex::new(r"(?<Format>[a-z A-Z]*): (?<Layer>[0-9]*?),(?<yStart>[0-9]{1}):(?<minStart>[0-9]{2}):(?<sStart>[0-9]{2}.[0-9]{2}),(?<yEnd>[0-9]{1}):(?<minEnd>[0-9]{2}):(?<sEnd>[0-9]{2}.[0-9]{2}),(?<Style>.*?),(?<Name>.*?),(?<MarginL>[0-9]*?),(?<MarginR>[0-9]*?),(?<MarginV>[0-9]*?),(?<Effect>.*?),(?<Text>.*)").unwrap();
-
-    for m in BufReader::new(f).lines() {
-        file_lenght += 1;
-        if m.unwrap().as_str() == "[Events]" {
-            event_starting = file_lenght + 1
-        }
-    }
 
     let f = File::open(file_name)?;
 
     let reader = BufReader::new(f);
-    println!("{}", file_lenght - event_starting);
 
+    let mut script_info: HashMap<String, String> = collections::HashMap::new();
     let mut lines: Vec<Line> = vec![];
-
-    //let mut lines: Vec<Line> = vec![
-    //    Line {
-    //        start: Time {
-    //            h: 0,
-    //            min: 0,
-    //            sec: 0.0
-    //        },
-    //        end: Time {
-    //            h: 0,
-    //            min: 0,
-    //            sec: 0.0
-    //        }
-    //    };
-    //    file_lenght - event_starting
-    //];
 
     let mut state = State::Start;
 
     for (index, line) in reader.lines().enumerate() {
+        if line.as_ref().unwrap().is_empty() {
+            continue;
+        }
         match line.as_ref().unwrap().as_str() {
+            "﻿[Script Info]" => {
+                state = State::Info;
+                continue;
+            }
+            "[Script Info]" => {
+                state = State::Info;
+                continue;
+            }
+            "[Aegisub Project Garbage]" => {
+                state = State::AegisGarbage;
+                continue;
+            }
+            "[V4+ Styles]" => {
+                state = State::Styles;
+                continue;
+            }
             "[Events]" => {
                 state = State::Events;
                 continue;
@@ -95,7 +87,17 @@ pub fn parse_ass(file_name: String) -> io::Result<()> {
 
         match state {
             State::Start => {}
-            State::Info => {}
+            State::Info => {
+                if line.as_ref().unwrap().as_bytes()[0] != ";".as_bytes()[0] {
+                    let Some(caps) = info_regex.captures(line.as_ref().unwrap().as_str()) else {
+                        println!("Can't bro");
+                        return Ok(());
+                    };
+
+                    //println!("{}: {}", &caps["field"], &caps["content"]);
+                    script_info.insert(caps["field"].to_string(), caps["content"].to_string());
+                }
+            }
             State::AegisGarbage => {}
             State::Styles => {}
             State::Events => {
@@ -104,19 +106,17 @@ pub fn parse_ass(file_name: String) -> io::Result<()> {
                     return Ok(());
                 };
 
-                //println!("{}", &args["Text"]);
-
                 let text_format = args["Format"].to_string();
                 let layer = args["Layer"].to_string().parse::<u8>().unwrap();
                 let start = Time {
-                    h: args["yStart"].to_string().parse::<u8>().unwrap(),
-                    min: args["minStart"].to_string().parse::<u8>().unwrap(),
-                    sec: args["sStart"].to_string().parse::<f32>().unwrap(),
+                    hours: args["yStart"].to_string().parse::<u8>().unwrap(),
+                    minutes: args["minStart"].to_string().parse::<u8>().unwrap(),
+                    seconds: args["sStart"].to_string().parse::<f32>().unwrap(),
                 };
                 let end = Time {
-                    h: args["yEnd"].to_string().parse::<u8>().unwrap(),
-                    min: args["minEnd"].to_string().parse::<u8>().unwrap(),
-                    sec: args["sEnd"].to_string().parse::<f32>().unwrap(),
+                    hours: args["yEnd"].to_string().parse::<u8>().unwrap(),
+                    minutes: args["minEnd"].to_string().parse::<u8>().unwrap(),
+                    seconds: args["sEnd"].to_string().parse::<f32>().unwrap(),
                 };
                 let text_style = AssStyle {
                     label: args["Style"].to_string(),
@@ -129,20 +129,6 @@ pub fn parse_ass(file_name: String) -> io::Result<()> {
                 )];
                 let effect = args["Effect"].to_string();
                 let ass_text = args["Text"].to_string();
-                //let times: Vec<Vec<&str>> = args.iter().map(|m| m.split(":").collect()).collect();
-                //
-                //let start = Time {
-                //    h: times[0][0].to_string().parse::<u32>().unwrap(),
-                //    min: times[0][1].to_string().parse::<u32>().unwrap(),
-                //    sec: times[0][2].to_string().parse::<f32>().unwrap(),
-                //};
-                //let end = Time {
-                //    h: times[1][0].to_string().parse::<u32>().unwrap(),
-                //    min: times[1][1].to_string().parse::<u32>().unwrap(),
-                //    sec: times[1][2].to_string().parse::<f32>().unwrap(),
-                //};
-                ////println!("{:?}", index - event_starting);
-                ////lines[index - event_starting] = Line { start, end };
                 lines.push(Line {
                     format: text_format,
                     layer,
@@ -158,15 +144,11 @@ pub fn parse_ass(file_name: String) -> io::Result<()> {
         }
     }
 
-    //let lineaa = reader
-    //    .lines()
-    //    .take_while(|m| m.as_ref().unwrap().as_str() != "[Event]");
-    //lineaa
-    //    .into_iter()
-    //    .for_each(move |m| println!("{:?}", m.as_ref()));
-
-    let subtitle_file = SubtitleFile { lines };
-    println!("{:?}", subtitle_file.lines.len());
+    let subtitle_file = SubtitleFile { script_info, lines };
+    println!("{:?}", &subtitle_file.lines.len());
+    for (field, content) in subtitle_file.script_info {
+        println!("{}, {}", field, content);
+    }
 
     Ok(())
 }
