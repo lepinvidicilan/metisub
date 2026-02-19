@@ -1,8 +1,21 @@
+use core::fmt;
 use std::collections::{self, HashMap};
+use std::error::Error;
 use std::io::{prelude::*, BufReader};
 use std::{fs::File, io};
 
 use regex::Regex;
+
+//#[derive(Clone, Copy, Debug)]
+//struct NotAAssFile;
+//
+//impl std::fmt::Display for NotAAssFile {
+//    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+//        write!(f, "The file you're trying to parse is not an ass file")
+//    }
+//}
+//
+//impl Error for NotAAssFile {}
 
 #[derive(Debug)]
 enum State {
@@ -36,20 +49,24 @@ pub struct Time {
 }
 
 pub struct SubtitleFile {
+    file_name: String,
     script_info: HashMap<String, String>,
+    video: String,
+    audio: String,
     lines: Vec<Line>,
 }
 
-pub fn parse_ass(file_name: String) -> io::Result<()> {
+pub fn parse_ass(file_name: String) -> io::Result<SubtitleFile> {
     let info_regex = Regex::new(r"(?<field>.*?): (?<content>.*)").unwrap();
     let event_regex =
         Regex::new(r"(?<Format>[a-z A-Z]*): (?<Layer>[0-9]*?),(?<yStart>[0-9]{1}):(?<minStart>[0-9]{2}):(?<sStart>[0-9]{2}.[0-9]{2}),(?<yEnd>[0-9]{1}):(?<minEnd>[0-9]{2}):(?<sEnd>[0-9]{2}.[0-9]{2}),(?<Style>.*?),(?<Name>.*?),(?<MarginL>[0-9]*?),(?<MarginR>[0-9]*?),(?<MarginV>[0-9]*?),(?<Effect>.*?),(?<Text>.*)").unwrap();
 
-    let f = File::open(file_name)?;
+    let f = File::open(&file_name)?;
 
     let reader = BufReader::new(f);
 
     let mut script_info: HashMap<String, String> = collections::HashMap::new();
+    let mut aegis_garbage: HashMap<String, String> = collections::HashMap::new();
     let mut lines: Vec<Line> = vec![];
 
     let mut state = State::Start;
@@ -98,12 +115,22 @@ pub fn parse_ass(file_name: String) -> io::Result<()> {
                     script_info.insert(caps["field"].to_string(), caps["content"].to_string());
                 }
             }
-            State::AegisGarbage => {}
+            State::AegisGarbage => {
+                if line.as_ref().unwrap().as_bytes()[0] != ";".as_bytes()[0] {
+                    let Some(caps) = info_regex.captures(line.as_ref().unwrap().as_str()) else {
+                        println!("Can't bro");
+                        return Ok(());
+                    };
+
+                    //println!("{}: {}", &caps["field"], &caps["content"]);
+                    aegis_garbage.insert(caps["field"].to_string(), caps["content"].to_string());
+                }
+            }
             State::Styles => {}
             State::Events => {
                 let Some(args) = event_regex.captures(line.as_ref().unwrap().as_str()) else {
                     println!("No match!");
-                    return Ok(());
+                    return Err("Not a ass file");
                 };
 
                 let text_format = args["Format"].to_string();
@@ -143,12 +170,31 @@ pub fn parse_ass(file_name: String) -> io::Result<()> {
             }
         }
     }
+    let video = if aegis_garbage.contains_key("Video File") {
+        aegis_garbage["Video File"].clone()
+    } else {
+        println!("can't find video");
+        "".to_string()
+    };
 
-    let subtitle_file = SubtitleFile { script_info, lines };
-    println!("{:?}", &subtitle_file.lines.len());
-    for (field, content) in subtitle_file.script_info {
-        println!("{}, {}", field, content);
-    }
+    let audio = if aegis_garbage.contains_key("Audio File") {
+        aegis_garbage["Audio File"].clone()
+    } else {
+        println!("Can't fine audio");
+        "".to_string()
+    };
 
-    Ok(())
+    let subtitle_file = SubtitleFile {
+        file_name,
+        script_info,
+        lines,
+        video,
+        audio,
+    };
+    println!("{}\n{}", &subtitle_file.video, &subtitle_file.audio);
+    //for (field, content) in subtitle_file.script_info {
+    //    println!("{}, {}", field, content);
+    //}
+
+    Ok(subtitle_file)
 }
