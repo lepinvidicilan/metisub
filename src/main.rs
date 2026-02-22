@@ -1,19 +1,5 @@
-use floem::{prelude::*, style};
 mod parser;
 
 fn main() {
     let _ = parser::parse_ass(String::from("Ave_mujica_vostfr_ep02_QCHECKDONE.ass"));
-
-    //floem::launch(counter_view);
-}
-
-fn counter_view() -> impl IntoView {
-    let mut counter = RwSignal::new(0);
-
-    h_stack((
-        button("Increment").action(move || counter += 1),
-        label(move || format!("Value {counter}")),
-        button("Decrement").action(move || counter -= 1),
-    ))
-    .style(|s| s.size_full().items_center().justify_center().gap(10))
 }

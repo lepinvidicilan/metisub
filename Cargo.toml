@@ -7,6 +7,6 @@ edition = "2021"
 resolver = "2"
 
 [dependencies]
-floem = "*"
+iced = "*"
 regex = "*"
 
