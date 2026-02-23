@@ -1,8 +1,6 @@
-use core::fmt;
 use std::collections::{self, HashMap};
-use std::error::Error;
-use std::io::{prelude::*, BufReader, ErrorKind};
-use std::{fs::File, io};
+use std::fs::File;
+use std::io::{prelude::*, BufReader};
 
 use regex::Regex;
 
@@ -15,16 +13,12 @@ enum State {
     Events,
 }
 
-pub struct AssStyle {
-    label: String,
-}
-
 pub struct Line {
     format: String,
     layer: u8,
     start: Time,
     end: Time,
-    style: AssStyle,
+    style: String,
     name: String,
     margin: Vec<(f32, f32, f32)>,
     effect: String,
@@ -40,6 +34,7 @@ pub struct Time {
 pub struct SubtitleFile {
     file_name: String,
     script_info: HashMap<String, String>,
+    styles: HashMap<String, AssStyle>,
     video: String,
     audio: String,
     lines: Vec<Line>,
@@ -55,6 +50,49 @@ impl ParseError {
     }
 }
 
+pub struct AssColour {
+    colour: (u8, u8, u8),
+    alpha: u8,
+}
+
+impl AssColour {
+    pub fn from_ass_colour(colour: String) -> AssColour {
+        let blue = u8::from_str_radix(&colour[4..6], 16).unwrap();
+        let green = u8::from_str_radix(&colour[6..8], 16).unwrap();
+        let red = u8::from_str_radix(&colour[8..10], 16).unwrap();
+
+        let alpha = u8::from_str_radix(&colour[2..4], 16).unwrap();
+
+        AssColour {
+            colour: (red, green, blue),
+            alpha,
+        }
+    }
+}
+
+pub struct AssStyle {
+    name: String,
+    font_name: String,
+    font_size: f32,
+    primary_colour: AssColour,
+    secondary_colour: AssColour,
+    outline_colour: AssColour,
+    back_colour: AssColour,
+    bold: bool,
+    italic: bool,
+    underline: bool,
+    strike_out: bool,
+    scale: (f32, f32),
+    spacing: f32,
+    angle: f32,
+    border_style: u8,
+    outline: f32,
+    shadow: f32,
+    alignment: u8,
+    margin: (f32, f32, f32),
+    encoding: u8,
+}
+
 pub fn parse_ass(file_name: String) -> std::result::Result<SubtitleFile, ParseError> {
     let info_regex = Regex::new(r"(?<field>.*?): (?<content>.*)").unwrap();
     let style_regex = Regex::new(
@@ -65,10 +103,10 @@ pub fn parse_ass(file_name: String) -> std::result::Result<SubtitleFile, ParseEr
         Regex::new(r"(?<Format>[a-z A-Z]*): (?<Layer>[0-9]*?),(?<yStart>[0-9]{1}):(?<minStart>[0-9]{2}):(?<sStart>[0-9]{2}.[0-9]{2}),(?<yEnd>[0-9]{1}):(?<minEnd>[0-9]{2}):(?<sEnd>[0-9]{2}.[0-9]{2}),(?<Style>.*?),(?<Name>.*?),(?<MarginL>[0-9]*?),(?<MarginR>[0-9]*?),(?<MarginV>[0-9]*?),(?<Effect>.*?),(?<Text>.*)").unwrap();
 
     let f = match File::open(&file_name) {
-        Ok(T) => T,
+        Ok(t) => t,
         Err(e) => {
             return Err(ParseError {
-                reason: String::from(format!("{e:?}")),
+                reason: format!("{e:?}"),
             })
         }
     };
@@ -77,6 +115,8 @@ pub fn parse_ass(file_name: String) -> std::result::Result<SubtitleFile, ParseEr
 
     let mut script_info: HashMap<String, String> = collections::HashMap::new();
     let mut aegis_garbage: HashMap<String, String> = collections::HashMap::new();
+    let mut styles: HashMap<String, AssStyle> = collections::HashMap::new();
+
     let mut lines: Vec<Line> = vec![];
 
     let mut state = State::Start;
@@ -86,11 +126,7 @@ pub fn parse_ass(file_name: String) -> std::result::Result<SubtitleFile, ParseEr
             continue;
         }
         match line.as_ref().unwrap().as_str() {
-            "﻿[Script Info]" => {
-                state = State::Info;
-                continue;
-            }
-            "[Script Info]" => {
+            "﻿[Script Info]" | "[Script Info]" => {
                 state = State::Info;
                 continue;
             }
@@ -106,10 +142,7 @@ pub fn parse_ass(file_name: String) -> std::result::Result<SubtitleFile, ParseEr
                 state = State::Events;
                 continue;
             }
-            "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text" => {
-                continue;
-            }
-            "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding" => {
+            "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text" | "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding" => {
                 continue;
             }
             &_ => {}
@@ -139,7 +172,6 @@ pub fn parse_ass(file_name: String) -> std::result::Result<SubtitleFile, ParseEr
                         });
                     };
 
-                    //println!("{}: {}", &caps["field"], &caps["content"]);
                     aegis_garbage.insert(caps["field"].to_string(), caps["content"].to_string());
                 }
             }
@@ -150,7 +182,76 @@ pub fn parse_ass(file_name: String) -> std::result::Result<SubtitleFile, ParseEr
                         reason: String::from("Not an Ass File"),
                     });
                 };
-                println!("{:?}", &caps["Encoding"]);
+
+                let name = caps["Name"].to_string();
+                let font_name = caps["Fontname"].to_string();
+                let font_size = match caps["Fontsize"].to_string().parse::<f32>() {
+                    Ok(t) => t,
+                    Err(e) => {
+                        return Err(ParseError {
+                            reason: format!("{e:?}"),
+                        })
+                    }
+                };
+
+                let primary_colour = AssColour::from_ass_colour(caps["PrimaryColour"].to_string());
+                let secondary_colour =
+                    AssColour::from_ass_colour(caps["SecondaryColour"].to_string());
+                let outline_colour = AssColour::from_ass_colour(caps["OutlineColour"].to_string());
+                let back_colour = AssColour::from_ass_colour(caps["BackColour"].to_string());
+
+                let bold = &caps["Bold"] == "-1";
+                let italic = &caps["Italic"] == "-1";
+                let underline = &caps["Underline"] == "-1";
+                let strike_out = &caps["StrikeOut"] == "-1";
+
+                let scale = (
+                    caps["ScaleX"].to_string().parse::<f32>().unwrap(),
+                    caps["ScaleY"].to_string().parse::<f32>().unwrap(),
+                );
+                let spacing = caps["Spacing"].to_string().parse::<f32>().unwrap();
+                let angle = caps["Angle"].to_string().parse::<f32>().unwrap();
+
+                let border_style = caps["BorderStyle"].to_string().parse::<u8>().unwrap();
+                let outline = caps["Outline"].to_string().parse::<f32>().unwrap();
+                let shadow = caps["Shadow"].to_string().parse::<f32>().unwrap();
+                let alignment = caps["Alignment"].to_string().parse::<u8>().unwrap();
+                let margin = (
+                    caps["MarginL"].to_string().parse::<f32>().unwrap(),
+                    caps["MarginR"].to_string().parse::<f32>().unwrap(),
+                    caps["MarginV"].to_string().parse::<f32>().unwrap(),
+                );
+                let encoding = if &caps["Encoding"] == "-1" {
+                    println!("Warning: Auto-detect base direction not implemented yet");
+                    1
+                } else {
+                    caps["Encoding"].to_string().parse::<u8>().unwrap()
+                };
+                styles.insert(
+                    String::from(&name),
+                    AssStyle {
+                        name,
+                        font_name,
+                        font_size,
+                        primary_colour,
+                        secondary_colour,
+                        outline_colour,
+                        back_colour,
+                        bold,
+                        italic,
+                        underline,
+                        strike_out,
+                        scale,
+                        spacing,
+                        angle,
+                        border_style,
+                        outline,
+                        shadow,
+                        alignment,
+                        margin,
+                        encoding,
+                    },
+                );
             }
             State::Events => {
                 let Some(args) = event_regex.captures(line.as_ref().unwrap().as_str()) else {
@@ -172,9 +273,7 @@ pub fn parse_ass(file_name: String) -> std::result::Result<SubtitleFile, ParseEr
                     minutes: args["minEnd"].to_string().parse::<u8>().unwrap(),
                     seconds: args["sEnd"].to_string().parse::<f32>().unwrap(),
                 };
-                let text_style = AssStyle {
-                    label: args["Style"].to_string(),
-                };
+                let text_style = args["Style"].to_string();
                 let name = args["Name"].to_string();
                 let margin = vec![(
                     args["MarginL"].to_string().parse::<f32>().unwrap(),
@@ -201,22 +300,23 @@ pub fn parse_ass(file_name: String) -> std::result::Result<SubtitleFile, ParseEr
         aegis_garbage["Video File"].clone()
     } else {
         println!("can't find video");
-        "".to_string()
+        String::new()
     };
 
     let audio = if aegis_garbage.contains_key("Audio File") {
         aegis_garbage["Audio File"].clone()
     } else {
         println!("Can't fine audio");
-        "".to_string()
+        String::new()
     };
 
     let subtitle_file = SubtitleFile {
         file_name,
         script_info,
-        lines,
+        styles,
         video,
         audio,
+        lines,
     };
     println!("{}\n{}", &subtitle_file.video, &subtitle_file.audio);
 
