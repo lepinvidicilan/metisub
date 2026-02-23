@@ -6,17 +6,6 @@ use std::{fs::File, io};
 
 use regex::Regex;
 
-//#[derive(Clone, Copy, Debug)]
-//struct NotAAssFile;
-//
-//impl std::fmt::Display for NotAAssFile {
-//    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-//        write!(f, "The file you're trying to parse is not an ass file")
-//    }
-//}
-//
-//impl Error for NotAAssFile {}
-
 #[derive(Debug)]
 enum State {
     Start,
