@@ -219,9 +219,6 @@ pub fn parse_ass(file_name: String) -> std::result::Result<SubtitleFile, ParseEr
         audio,
     };
     println!("{}\n{}", &subtitle_file.video, &subtitle_file.audio);
-    //for (field, content) in subtitle_file.script_info {
-    //    println!("{}, {}", field, content);
-    //}
 
     Ok(subtitle_file)
 }
