@@ -1,5 +1,10 @@
 mod parser;
 
 fn main() {
-    let _ = parser::parse_ass(String::from("Ave_mujica_vostfr_ep02_QCHECKDONE.ass"));
+    let _ = match parser::parse_ass(String::from(
+        "[Team Arcedo] BanG Dream! Ave Mujica - 11 VOSTFR.ass",
+    )) {
+        Ok(T) => T,
+        Err(e) => panic!("{}", e.get_reason()),
+    };
 }

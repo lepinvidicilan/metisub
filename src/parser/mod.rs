@@ -1,7 +1,7 @@
 use core::fmt;
 use std::collections::{self, HashMap};
 use std::error::Error;
-use std::io::{prelude::*, BufReader};
+use std::io::{prelude::*, BufReader, ErrorKind};
 use std::{fs::File, io};
 
 use regex::Regex;
@@ -56,12 +56,33 @@ pub struct SubtitleFile {
     lines: Vec<Line>,
 }
 
-pub fn parse_ass(file_name: String) -> io::Result<SubtitleFile> {
+pub struct ParseError {
+    reason: String,
+}
+
+impl ParseError {
+    pub fn get_reason(self) -> String {
+        self.reason
+    }
+}
+
+pub fn parse_ass(file_name: String) -> std::result::Result<SubtitleFile, ParseError> {
     let info_regex = Regex::new(r"(?<field>.*?): (?<content>.*)").unwrap();
+    let style_regex = Regex::new(
+        r"(?<Format>[a-z A-Z]*): (?<Name>.*?),(?<Fontname>.*?),(?<Fontsize>[0-9]*),(?<PrimaryColour>&[A-Z 0-9]{9}),(?<SecondaryColour>&[A-Z 0-9]{9}),(?<OutlineColour>&[A-Z 0-9]{9}),(?<BackColour>&[A-Z 0-9]{9}),(?<Bold>\-?[0-9]),(?<Italic>\-?[0-9]),(?<Underline>\-?[0-9]),(?<StrikeOut>\-?[0-9]),(?<ScaleX>[0-9]{1,3}),(?<ScaleY>[0-9]{1,3}),(?<Spacing>.*?),(?<Angle>.*?),(?<BorderStyle>.*?),(?<Outline>.*?),(?<Shadow>.*?),(?<Alignment>[0-9]),(?<MarginL>.*?),(?<MarginR>.*?),(?<MarginV>.*?),(?<Encoding>[0-9])",
+    )
+    .unwrap();
     let event_regex =
         Regex::new(r"(?<Format>[a-z A-Z]*): (?<Layer>[0-9]*?),(?<yStart>[0-9]{1}):(?<minStart>[0-9]{2}):(?<sStart>[0-9]{2}.[0-9]{2}),(?<yEnd>[0-9]{1}):(?<minEnd>[0-9]{2}):(?<sEnd>[0-9]{2}.[0-9]{2}),(?<Style>.*?),(?<Name>.*?),(?<MarginL>[0-9]*?),(?<MarginR>[0-9]*?),(?<MarginV>[0-9]*?),(?<Effect>.*?),(?<Text>.*)").unwrap();
 
-    let f = File::open(&file_name)?;
+    let f = match File::open(&file_name) {
+        Ok(T) => T,
+        Err(e) => {
+            return Err(ParseError {
+                reason: String::from(format!("{e:?}")),
+            })
+        }
+    };
 
     let reader = BufReader::new(f);
 
@@ -99,6 +120,9 @@ pub fn parse_ass(file_name: String) -> io::Result<SubtitleFile> {
             "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text" => {
                 continue;
             }
+            "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding" => {
+                continue;
+            }
             &_ => {}
         }
 
@@ -108,7 +132,9 @@ pub fn parse_ass(file_name: String) -> io::Result<SubtitleFile> {
                 if line.as_ref().unwrap().as_bytes()[0] != ";".as_bytes()[0] {
                     let Some(caps) = info_regex.captures(line.as_ref().unwrap().as_str()) else {
                         println!("Can't bro");
-                        return Ok(());
+                        return Err(ParseError {
+                            reason: String::from("Not an Ass File"),
+                        });
                     };
 
                     //println!("{}: {}", &caps["field"], &caps["content"]);
@@ -119,18 +145,30 @@ pub fn parse_ass(file_name: String) -> io::Result<SubtitleFile> {
                 if line.as_ref().unwrap().as_bytes()[0] != ";".as_bytes()[0] {
                     let Some(caps) = info_regex.captures(line.as_ref().unwrap().as_str()) else {
                         println!("Can't bro");
-                        return Ok(());
+                        return Err(ParseError {
+                            reason: String::from("Not an Ass File"),
+                        });
                     };
 
                     //println!("{}: {}", &caps["field"], &caps["content"]);
                     aegis_garbage.insert(caps["field"].to_string(), caps["content"].to_string());
                 }
             }
-            State::Styles => {}
+            State::Styles => {
+                let Some(caps) = style_regex.captures(line.as_ref().unwrap().as_str()) else {
+                    println!("Can't bro");
+                    return Err(ParseError {
+                        reason: String::from("Not an Ass File"),
+                    });
+                };
+                println!("{:?}", &caps["Encoding"]);
+            }
             State::Events => {
                 let Some(args) = event_regex.captures(line.as_ref().unwrap().as_str()) else {
                     println!("No match!");
-                    return Err("Not a ass file");
+                    return Err(ParseError {
+                        reason: String::from("Not an Ass File"),
+                    });
                 };
 
                 let text_format = args["Format"].to_string();
