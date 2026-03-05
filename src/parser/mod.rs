@@ -1,8 +1,13 @@
 use std::collections::{self, HashMap};
 use std::fs::File;
 use std::io::{prelude::*, BufReader};
+use std::path::PathBuf;
 
+use iced::widget::{row, table, text, Row, Text};
+use iced::Element;
 use regex::Regex;
+
+use crate::ui::Message;
 
 #[derive(Debug)]
 enum State {
@@ -13,24 +18,33 @@ enum State {
     Events,
 }
 
+#[derive(Clone)]
 pub struct Line {
-    format: String,
-    layer: u8,
-    start: Time,
-    end: Time,
-    style: String,
-    name: String,
-    margin: Vec<(f32, f32, f32)>,
-    effect: String,
-    text: String,
+    pub format: String,
+    pub layer: u8,
+    pub start: Time,
+    pub end: Time,
+    pub style: String,
+    pub name: String,
+    pub margin: Vec<(f32, f32, f32)>,
+    pub effect: String,
+    pub text: String,
 }
 
+impl Line {
+    pub fn view<'a>(&self) -> Row<'a, Message> {
+        row![text(self.format.clone()), text(self.text.clone())]
+    }
+}
+
+#[derive(Clone)]
 pub struct Time {
     hours: u8,
     minutes: u8,
     seconds: f32,
 }
 
+#[derive(Default)]
 pub struct SubtitleFile {
     file_name: String,
     script_info: HashMap<String, String>,
@@ -40,6 +54,33 @@ pub struct SubtitleFile {
     lines: Vec<Line>,
 }
 
+impl SubtitleFile {
+    pub fn get_name(&self) -> String {
+        self.file_name.clone()
+    }
+    pub fn get_line(&self, l: usize) -> Line {
+        let ass_line = self.lines[l].clone();
+        Line {
+            format: ass_line.format,
+            layer: ass_line.layer,
+            start: ass_line.start,
+            end: ass_line.end,
+            style: ass_line.style,
+            name: ass_line.name,
+            margin: ass_line.margin,
+            effect: ass_line.effect,
+            text: ass_line.text,
+        }
+    }
+    pub fn get_lines(&self) -> Vec<Line> {
+        self.lines.clone()
+    }
+    pub fn get_number_of_line(&self) -> usize {
+        self.lines.len()
+    }
+}
+
+#[derive(Debug)]
 pub struct ParseError {
     reason: String,
 }
@@ -93,7 +134,7 @@ pub struct AssStyle {
     encoding: u8,
 }
 
-pub fn parse_ass(file_name: String) -> std::result::Result<SubtitleFile, ParseError> {
+pub fn parse_ass(path: PathBuf) -> std::result::Result<SubtitleFile, ParseError> {
     let info_regex = Regex::new(r"(?<field>.*?): (?<content>.*)").unwrap();
     let style_regex = Regex::new(
         r"(?<Format>[a-z A-Z]*): (?<Name>.*?),(?<Fontname>.*?),(?<Fontsize>[0-9]*),(?<PrimaryColour>&[A-Z 0-9]{9}),(?<SecondaryColour>&[A-Z 0-9]{9}),(?<OutlineColour>&[A-Z 0-9]{9}),(?<BackColour>&[A-Z 0-9]{9}),(?<Bold>\-?[0-9]),(?<Italic>\-?[0-9]),(?<Underline>\-?[0-9]),(?<StrikeOut>\-?[0-9]),(?<ScaleX>[0-9]{1,3}),(?<ScaleY>[0-9]{1,3}),(?<Spacing>.*?),(?<Angle>.*?),(?<BorderStyle>.*?),(?<Outline>.*?),(?<Shadow>.*?),(?<Alignment>[0-9]),(?<MarginL>.*?),(?<MarginR>.*?),(?<MarginV>.*?),(?<Encoding>[0-9])",
@@ -102,7 +143,7 @@ pub fn parse_ass(file_name: String) -> std::result::Result<SubtitleFile, ParseEr
     let event_regex =
         Regex::new(r"(?<Format>[a-z A-Z]*): (?<Layer>[0-9]*?),(?<yStart>[0-9]{1}):(?<minStart>[0-9]{2}):(?<sStart>[0-9]{2}.[0-9]{2}),(?<yEnd>[0-9]{1}):(?<minEnd>[0-9]{2}):(?<sEnd>[0-9]{2}.[0-9]{2}),(?<Style>.*?),(?<Name>.*?),(?<MarginL>[0-9]*?),(?<MarginR>[0-9]*?),(?<MarginV>[0-9]*?),(?<Effect>.*?),(?<Text>.*)").unwrap();
 
-    let f = match File::open(&file_name) {
+    let f = match File::open(&path) {
         Ok(t) => t,
         Err(e) => {
             return Err(ParseError {
@@ -110,6 +151,8 @@ pub fn parse_ass(file_name: String) -> std::result::Result<SubtitleFile, ParseEr
             })
         }
     };
+
+    let file_name = path.file_name().unwrap().to_str().unwrap().to_string();
 
     let reader = BufReader::new(f);
 
@@ -121,7 +164,7 @@ pub fn parse_ass(file_name: String) -> std::result::Result<SubtitleFile, ParseEr
 
     let mut state = State::Start;
 
-    for (index, line) in reader.lines().enumerate() {
+    for line in reader.lines() {
         if line.as_ref().unwrap().is_empty() {
             continue;
         }

@@ -4,9 +4,13 @@ version = "0.0.1"
 edition = "2021"
 
 [workspace]
-resolver = "2"
+rfd = true
+iced = true
+tokio=true
 
 [dependencies]
 iced = "*"
-regex = "*"
+rfd="*"
+regex="*"
+tokio = { version = "1.49.0", features = ["fs", "rt"] }
 
