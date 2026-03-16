@@ -7,7 +7,7 @@ use iced::{
     Renderer, Task, Theme, Window,
 };
 
-use crate::parser;
+use crate::parser::{self, SubtitleFile};
 
 const EDITOR: &str = "editor";
 
@@ -29,6 +29,7 @@ pub enum Error {
 pub enum Message {
     OpenFile,
     FileOpened(Result<PathBuf, Error>),
+    EditorActionPerformed(text_editor::Action),
 }
 
 fn open_file(window: &dyn Window) -> impl Future<Output = Result<PathBuf, Error>> + use<> {
@@ -63,17 +64,33 @@ impl App {
                         .map(Message::FileOpened)
                 }
             }
-
             Message::FileOpened(result) => {
                 self.is_loading = false;
 
-                if let Ok(path) = result {
-                    self.subtitle_file_path = Some(path.to_owned());
-                    self.subtitle_file = parser::parse_ass(path).unwrap()
-                }
+                match result {
+                    Ok(path) => {
+                        self.subtitle_file_path = Some(path.to_owned());
+                        self.subtitle_file = match parser::parse_ass(path) {
+                            Ok(t) => t,
+                            Err(e) => {
+                                println!("{}", e.get_reason());
+                                return Task::none();
+                            }
+                        };
+                    }
+                    Err(e) => {
+                        println!("{:?}", e);
+                        return Task::none();
+                    }
+                };
 
                 self.selected_line =
                     text_editor::Content::with_text(&self.subtitle_file.get_line(0).text);
+
+                Task::none()
+            }
+            Message::EditorActionPerformed(action) => {
+                self.selected_line.perform(action);
                 Task::none()
             }
         }
@@ -81,8 +98,6 @@ impl App {
 
     pub fn view(&self) -> Column<'_, Message> {
         let action: iced::widget::Button<'_, _, Theme, Renderer> = button(text('\u{0f115}'));
-        println!("{}", self.subtitle_file.get_number_of_line());
-        println!("{}", self.subtitle_file.get_number_of_line() > 0);
 
         let mut ass_line: Column<'_, Message> = if self.subtitle_file.get_number_of_line() > 0 {
             column![self.subtitle_file.get_line(0).view()]
@@ -113,10 +128,13 @@ impl App {
                     )
                     .style(container::rounded_box)
                 } else {
-                    panic!("a");
+                    dbg!();
+                    todo!("Todo thing");
                 },
             ],
-            text_editor(&self.selected_line).id(EDITOR),
+            text_editor(&self.selected_line)
+                .id(EDITOR)
+                .on_action(Message::EditorActionPerformed),
             ass_line
         ]
     }

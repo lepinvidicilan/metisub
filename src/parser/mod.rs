@@ -135,6 +135,28 @@ pub struct AssStyle {
 }
 
 pub fn parse_ass(path: PathBuf) -> std::result::Result<SubtitleFile, ParseError> {
+    if !path.is_file() | !path.exists() {
+        return Err(ParseError {
+            reason: String::from("Bro ouvre un fichier j'ai juré"),
+        });
+    }
+
+    if path
+        .file_name()
+        .to_owned()
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(".")
+        .last()
+        .unwrap()
+        != "ass"
+    {
+        return Err(ParseError {
+            reason: String::from("Not an Ass file, enculé"),
+        });
+    }
+
     let info_regex = Regex::new(r"(?<field>.*?): (?<content>.*)").unwrap();
     let style_regex = Regex::new(
         r"(?<Format>[a-z A-Z]*): (?<Name>.*?),(?<Fontname>.*?),(?<Fontsize>[0-9]*),(?<PrimaryColour>&[A-Z 0-9]{9}),(?<SecondaryColour>&[A-Z 0-9]{9}),(?<OutlineColour>&[A-Z 0-9]{9}),(?<BackColour>&[A-Z 0-9]{9}),(?<Bold>\-?[0-9]),(?<Italic>\-?[0-9]),(?<Underline>\-?[0-9]),(?<StrikeOut>\-?[0-9]),(?<ScaleX>[0-9]{1,3}),(?<ScaleY>[0-9]{1,3}),(?<Spacing>.*?),(?<Angle>.*?),(?<BorderStyle>.*?),(?<Outline>.*?),(?<Shadow>.*?),(?<Alignment>[0-9]),(?<MarginL>.*?),(?<MarginR>.*?),(?<MarginV>.*?),(?<Encoding>[0-9])",
@@ -165,8 +187,17 @@ pub fn parse_ass(path: PathBuf) -> std::result::Result<SubtitleFile, ParseError>
     let mut state = State::Start;
 
     for line in reader.lines() {
-        if line.as_ref().unwrap().is_empty() {
-            continue;
+        match line.as_ref() {
+            Ok(t) => {
+                if t.is_empty() {
+                    continue;
+                }
+            }
+            _ => {
+                return Err(ParseError {
+                    reason: String::from("Not an ass file"),
+                })
+            }
         }
         match line.as_ref().unwrap().as_str() {
             "﻿[Script Info]" | "[Script Info]" => {
@@ -188,14 +219,26 @@ pub fn parse_ass(path: PathBuf) -> std::result::Result<SubtitleFile, ParseError>
             "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text" | "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding" => {
                 continue;
             }
-            &_ => {}
+            &_ => {
+            }
         }
 
         match state {
-            State::Start => {}
+            State::Start => {
+                return Err(ParseError {
+                    reason: String::from("Not an Ass file"),
+                });
+            }
             State::Info => {
                 if line.as_ref().unwrap().as_bytes()[0] != ";".as_bytes()[0] {
-                    let Some(caps) = info_regex.captures(line.as_ref().unwrap().as_str()) else {
+                    let Some(caps) = info_regex.captures(match line.as_ref() {
+                        Ok(t) => t.as_str(),
+                        Err(_) => {
+                            return Err(ParseError {
+                                reason: String::from("Not an Ass file"),
+                            });
+                        }
+                    }) else {
                         println!("Can't bro");
                         return Err(ParseError {
                             reason: String::from("Not an Ass File"),
@@ -208,7 +251,14 @@ pub fn parse_ass(path: PathBuf) -> std::result::Result<SubtitleFile, ParseError>
             }
             State::AegisGarbage => {
                 if line.as_ref().unwrap().as_bytes()[0] != ";".as_bytes()[0] {
-                    let Some(caps) = info_regex.captures(line.as_ref().unwrap().as_str()) else {
+                    let Some(caps) = info_regex.captures(match line.as_ref() {
+                        Ok(t) => t.as_str(),
+                        Err(_) => {
+                            return Err(ParseError {
+                                reason: String::from("Not an Ass file"),
+                            });
+                        }
+                    }) else {
                         println!("Can't bro");
                         return Err(ParseError {
                             reason: String::from("Not an Ass File"),
@@ -219,7 +269,14 @@ pub fn parse_ass(path: PathBuf) -> std::result::Result<SubtitleFile, ParseError>
                 }
             }
             State::Styles => {
-                let Some(caps) = style_regex.captures(line.as_ref().unwrap().as_str()) else {
+                let Some(caps) = style_regex.captures(match line.as_ref() {
+                    Ok(t) => t.as_str(),
+                    Err(_) => {
+                        return Err(ParseError {
+                            reason: String::from("Not an Ass file"),
+                        });
+                    }
+                }) else {
                     println!("Can't bro");
                     return Err(ParseError {
                         reason: String::from("Not an Ass File"),
@@ -297,7 +354,14 @@ pub fn parse_ass(path: PathBuf) -> std::result::Result<SubtitleFile, ParseError>
                 );
             }
             State::Events => {
-                let Some(args) = event_regex.captures(line.as_ref().unwrap().as_str()) else {
+                let Some(args) = event_regex.captures(match line.as_ref() {
+                    Ok(t) => t.as_str(),
+                    Err(_) => {
+                        return Err(ParseError {
+                            reason: String::from("Not an Ass file"),
+                        });
+                    }
+                }) else {
                     println!("No match!");
                     return Err(ParseError {
                         reason: String::from("Not an Ass File"),
@@ -342,14 +406,14 @@ pub fn parse_ass(path: PathBuf) -> std::result::Result<SubtitleFile, ParseError>
     let video = if aegis_garbage.contains_key("Video File") {
         aegis_garbage["Video File"].clone()
     } else {
-        println!("can't find video");
+        println!("Can't find video");
         String::new()
     };
 
     let audio = if aegis_garbage.contains_key("Audio File") {
         aegis_garbage["Audio File"].clone()
     } else {
-        println!("Can't fine audio");
+        println!("Can't find audio");
         String::new()
     };
 
